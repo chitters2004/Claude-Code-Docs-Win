@@ -337,10 +337,10 @@ def setup_hooks():
     if SETTINGS_FILE.exists():
         print("  Updating Claude settings...")
         try:
-            with open(SETTINGS_FILE, 'r') as f:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
-        except json.JSONDecodeError:
-            print("  [WARNING]  Warning: Invalid settings.json, creating new one")
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            print(f"  [WARNING] Could not read settings.json ({e}), creating new one")
             settings = {}
     else:
         print("  Creating Claude settings...")

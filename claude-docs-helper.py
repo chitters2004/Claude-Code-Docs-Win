@@ -35,25 +35,29 @@ def load_manifest() -> Dict:
         return {}
     
     try:
-        with open(MANIFEST_FILE, 'r') as f:
+        with open(MANIFEST_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+        print(f"[WARNING] Could not load manifest: {e}")
         return {}
 
 
 def git_operation(args: List[str]) -> Tuple[bool, str]:
-    """Execute git operation"""
+    """Execute git operation with timeout"""
     try:
         result = subprocess.run(
             ["git"] + args,
             cwd=INSTALL_DIR,
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            timeout=30
         )
         return True, result.stdout.strip()
+    except subprocess.TimeoutExpired:
+        return False, "Git operation timed out"
     except subprocess.CalledProcessError as e:
-        return False, e.stderr.strip()
+        return False, e.stderr.strip() if e.stderr else "Git command failed"
     except FileNotFoundError:
         return False, "Git not found"
 
@@ -70,7 +74,10 @@ def check_for_updates() -> Tuple[bool, str]:
     if not success:
         return False, "Could not compare with remote"
     
-    behind_count = int(behind) if behind.isdigit() else 0
+    try:
+        behind_count = int(behind.strip()) if behind.strip() else 0
+    except (ValueError, AttributeError):
+        behind_count = 0
     
     if behind_count > 0:
         return True, f"{behind_count} update(s) available"
@@ -87,7 +94,12 @@ def pull_updates() -> bool:
         print("[OK] Documentation updated successfully")
         return True
     else:
-        print(f"[WARNING]  Update failed: {output}")
+        print(f"[WARNING] Update failed: {output}")
+        # Try to provide more helpful error messages
+        if "timeout" in output.lower():
+            print("[INFO] Network connection may be slow or unavailable")
+        elif "permission" in output.lower():
+            print("[INFO] Check file permissions in documentation directory")
         return False
 
 
@@ -149,7 +161,7 @@ def read_doc(topic: str) -> Optional[str]:
     if doc_file.exists():
         try:
             return doc_file.read_text(encoding='utf-8')
-        except Exception as e:
+        except (OSError, UnicodeDecodeError, PermissionError) as e:
             return f"Error reading file: {e}"
     
     return None
@@ -233,7 +245,9 @@ def hook_check() -> None:
             last_check_time = datetime.fromtimestamp(LAST_CHECK_FILE.stat().st_mtime)
             if datetime.now() - last_check_time < CHECK_INTERVAL:
                 should_check = False
-        except Exception:
+        except (OSError, ValueError, OverflowError):
+            # File doesn't exist, corrupted timestamp, or other file system issue
+            # Continue with update check
             pass
     
     if should_check:
